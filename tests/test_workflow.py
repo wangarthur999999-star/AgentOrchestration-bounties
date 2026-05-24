@@ -1,7 +1,7 @@
 """Tests for workflow expression validation and sandboxing (bounty #3396)."""
 
 import pytest
-from src.common.errors import ExpressionValidationError, WorkflowValidationError
+from src.common.errors import WorkflowValidationError
 from src.orchestrator.workflow import (
     ConditionExpression,
     StepStatus,
