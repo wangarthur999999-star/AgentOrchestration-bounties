@@ -7,7 +7,67 @@ from src.common.config import Config
 from src.common.logging import configure_logging
 
 
-def cli():
+def _handle_init(args: argparse.Namespace) -> int:
+    try:
+        print(f"Initializing project: {args.name}")
+        return 0
+    except Exception as exc:
+        print(f"init failed: {exc}", file=sys.stderr)
+        return 2
+
+
+def _handle_deploy(args: argparse.Namespace) -> int:
+    import subprocess
+
+    try:
+        print(f"Deploying agent from manifest: {args.manifest}")
+        result = subprocess.run(
+            ["orchestrator", "deploy", args.manifest],
+            capture_output=True, text=True,
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode
+    except FileNotFoundError:
+        print("deploy failed: orchestrator backend not found", file=sys.stderr)
+        return 3
+    except Exception as exc:
+        print(f"deploy failed: {exc}", file=sys.stderr)
+        return 2
+
+
+def _handle_status(args: argparse.Namespace) -> int:
+    try:
+        if args.watch:
+            print("Checking agent status... (watch mode)")
+        else:
+            print("Checking agent status...")
+        return 0
+    except Exception as exc:
+        print(f"status failed: {exc}", file=sys.stderr)
+        return 2
+
+
+def _handle_logs(args: argparse.Namespace) -> int:
+    try:
+        print(f"Fetching logs for agent: {args.agent_id}")
+        return 0
+    except Exception as exc:
+        print(f"logs failed: {exc}", file=sys.stderr)
+        return 2
+
+
+_HANDLERS = {
+    "init": _handle_init,
+    "deploy": _handle_deploy,
+    "status": _handle_status,
+    "logs": _handle_logs,
+}
+
+
+def cli() -> None:
     parser = argparse.ArgumentParser(description="Agent Orchestrator CLI")
     parser.add_argument("--config", "-c", help="Path to config file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
@@ -34,17 +94,17 @@ def cli():
     else:
         configure_logging("INFO")
 
-    if args.command == "init":
-        print(f"Initializing project: {args.name}")
-    elif args.command == "deploy":
-        print(f"Deploying agent from manifest: {args.manifest}")
-    elif args.command == "status":
-        print("Checking agent status...")
-    elif args.command == "logs":
-        print(f"Fetching logs for agent: {args.agent_id}")
-    else:
+    if args.command is None:
         parser.print_help()
         sys.exit(1)
+
+    handler = _HANDLERS.get(args.command)
+    if handler is None:
+        print(f"Unknown command: {args.command}", file=sys.stderr)
+        sys.exit(1)
+
+    exit_code = handler(args)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
