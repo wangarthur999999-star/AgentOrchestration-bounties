@@ -41,6 +41,16 @@ class ResourceExhaustedError(AgentOrchestratorError):
     def __init__(self, resource: str):
         super().__init__(f"Resource exhausted: {resource}")
 
+
+class WorkflowValidationError(AgentOrchestratorError):
+    def __init__(self, message: str):
+        super().__init__(f"Workflow validation error: {message}")
+
+
+class ExpressionValidationError(AgentOrchestratorError):
+    def __init__(self, reason: str):
+        super().__init__(f"Expression validation failed: {reason}")
+
 # 2019-01-25T13:21:06 update
 
 # 2019-02-15T19:31:32 update
