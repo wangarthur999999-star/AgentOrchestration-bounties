@@ -2,9 +2,12 @@
 
 import asyncio
 import heapq
+import logging
 import time
 from typing import Any, Dict, Optional
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 class PriorityQueue:
@@ -35,17 +38,30 @@ class TaskScheduler:
         self._queues: Dict[str, PriorityQueue] = {}
         self._scheduled: Dict[str, float] = {}
         self._in_flight: Dict[str, Dict] = {}
+        self._attempt_state: Dict[str, int] = {}
+        self._task_revision: Dict[str, int] = {}
         self._max_retries = 3
+
+    @staticmethod
+    def _gen_attempt_id(task_id: str) -> str:
+        return f"{task_id}-{uuid4().hex[:8]}"
 
     def enqueue(self, task: Dict, queue: str = "default", priority: int = 0) -> str:
         task_id = str(uuid4())
+        attempt_id = self._gen_attempt_id(task_id)
         task["id"] = task_id
+        task["attempt_id"] = attempt_id
         task["enqueued_at"] = time.time()
-        task["retries"] = 0
+        task["revision"] = self._task_revision.get(task_id, 0)
+        self._attempt_state[attempt_id] = 0
 
         if queue not in self._queues:
             self._queues[queue] = PriorityQueue()
         self._queues[queue].push(task, priority)
+        logger.debug(
+            "Task %s attempt %s enqueued (revision %d)",
+            task_id, attempt_id[:16], task["revision"],
+        )
         return task_id
 
     def schedule(self, task: Dict, delay: float, queue: str = "default", priority: int = 0) -> str:
@@ -70,16 +86,51 @@ class TaskScheduler:
         return None
 
     def complete(self, task_id: str) -> bool:
-        return self._in_flight.pop(task_id, None) is not None
-
-    def fail(self, task_id: str, queue: str = "default") -> bool:
         task = self._in_flight.pop(task_id, None)
         if task:
-            task["retries"] += 1
-            if task["retries"] < self._max_retries:
-                self.enqueue(task, queue, priority=task.get("priority", 0))
-                return True
+            self._attempt_state.pop(task.get("attempt_id", ""), None)
+            self._task_revision[task_id] = self._task_revision.get(task_id, 0) + 1
+            logger.debug("Task %s completed (revision %d)", task_id, self._task_revision[task_id])
+            return True
         return False
+
+    def fail(self, task_id: str, queue: str = "default", *, attempt_id: str | None = None) -> bool:
+        task = self._in_flight.pop(task_id, None)
+        if task is None:
+            logger.warning("Task %s not in flight; rejecting stale fail call", task_id)
+            return False
+
+        expected_attempt = task.get("attempt_id", "")
+        if attempt_id and attempt_id != expected_attempt:
+            logger.warning(
+                "Task %s attempt mismatch: got %s, expected %s; rejecting stale transition",
+                task_id, attempt_id[:16], expected_attempt[:16],
+            )
+            self._in_flight[task_id] = task
+            return False
+
+        retries = self._attempt_state.get(expected_attempt, 0)
+        retries += 1
+        self._attempt_state[expected_attempt] = retries
+
+        if retries >= self._max_retries:
+            logger.info(
+                "Task %s attempt %s exhausted retries (%d/%d)",
+                task_id, expected_attempt[:16], retries, self._max_retries,
+            )
+            return False
+
+        logger.debug(
+            "Task %s attempt %s retry %d/%d",
+            task_id, expected_attempt[:16], retries, self._max_retries,
+        )
+
+        new_attempt = self._gen_attempt_id(task_id)
+        task["attempt_id"] = new_attempt
+        task["revision"] = self._task_revision.get(task_id, 0)
+        self._attempt_state[new_attempt] = 0
+        self.enqueue(task, queue, priority=task.get("priority", 0))
+        return True
 
 # 2019-04-25T08:37:12 update
 

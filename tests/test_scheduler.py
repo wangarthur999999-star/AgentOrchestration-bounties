@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from src.orchestrator.scheduler import TaskScheduler
 
@@ -12,7 +14,6 @@ class TestTaskScheduler:
 
     def test_dequeue_task(self):
         self.scheduler.enqueue({"type": "test", "payload": {"data": 1}})
-        import asyncio
         task = asyncio.run(self.scheduler.dequeue())
         assert task is not None
         assert task["type"] == "test"
@@ -20,21 +21,88 @@ class TestTaskScheduler:
     def test_enqueue_multiple_priorities(self):
         self.scheduler.enqueue({"type": "low"}, priority=1)
         self.scheduler.enqueue({"type": "high"}, priority=10)
-        import asyncio
         task = asyncio.run(self.scheduler.dequeue())
         assert task["type"] == "high"
 
     def test_complete_task(self):
         self.scheduler.enqueue({"type": "test"})
-        import asyncio
         task = asyncio.run(self.scheduler.dequeue())
         assert self.scheduler.complete(task["id"])
 
     def test_fail_task_with_retry(self):
         self.scheduler.enqueue({"type": "test"})
-        import asyncio
         task = asyncio.run(self.scheduler.dequeue())
         assert self.scheduler.fail(task["id"])
+
+
+class TestRetryCounterAttemptScoped:
+    """Regression tests for retry counter attempt scoping (bounty #3328)."""
+
+    def setup_method(self):
+        self.scheduler = TaskScheduler()
+
+    def test_retries_are_attempt_scoped_not_global(self):
+        """Each attempt starts with fresh retry counter. Old counter does not carry over."""
+        task_id = self.scheduler.enqueue({"type": "test"})
+        task = asyncio.run(self.scheduler.dequeue())
+        first_attempt = task["attempt_id"]
+
+        assert self.scheduler.fail(task["id"])
+        retried = asyncio.run(self.scheduler.dequeue())
+        second_attempt = retried["attempt_id"]
+        assert second_attempt != first_attempt
+
+        assert self.scheduler._attempt_state.get(first_attempt, 0) <= 1
+        assert self.scheduler._attempt_state.get(second_attempt, 0) == 0
+
+    def test_stale_attempt_id_rejected(self):
+        """Calling fail with stale attempt_id must not advance retry counter."""
+        task_id = self.scheduler.enqueue({"type": "test"})
+        task = asyncio.run(self.scheduler.dequeue())
+        original_attempt = task["attempt_id"]
+
+        assert not self.scheduler.fail(task["id"], attempt_id="wrong-attempt-id")
+        assert self.scheduler._in_flight.get(task["id"]) is task
+        assert task["attempt_id"] == original_attempt
+
+    def test_max_retries_exhausted(self):
+        """After max_retries on the same attempt, fail returns False."""
+        scheduler = TaskScheduler()
+        scheduler._max_retries = 2
+        scheduler.enqueue({"type": "test"})
+        task = asyncio.run(scheduler.dequeue())
+        attempt_id = task["attempt_id"]
+
+        # First fail on this attempt — should succeed (retries 0→1, 1<2)
+        assert scheduler.fail(task["id"], attempt_id=attempt_id)
+        # Re-dequeue the re-enqueued task
+        retried = asyncio.run(scheduler.dequeue())
+        assert retried is not None
+
+        # Fail again with the SAME stale attempt_id — now 1→2, 2>=2 exhausted
+        assert not scheduler.fail(retried["id"], attempt_id=attempt_id)
+        # Task remains in flight (fail was rejected)
+        assert scheduler._in_flight.get(retried["id"]) is retried
+
+    def test_attempts_independent_across_parallel_branches(self):
+        """Two tasks enqueued independently each get own attempt tracking."""
+        t1 = self.scheduler.enqueue({"type": "a"})
+        t2 = self.scheduler.enqueue({"type": "b"})
+
+        task1 = asyncio.run(self.scheduler.dequeue())
+        task2 = asyncio.run(self.scheduler.dequeue())
+
+        assert task1["attempt_id"] != task2["attempt_id"]
+        assert self.scheduler._attempt_state[task1["attempt_id"]] == 0
+        assert self.scheduler._attempt_state[task2["attempt_id"]] == 0
+
+    def test_revision_increments_on_complete(self):
+        """Task revision increments on successful completion."""
+        self.scheduler.enqueue({"type": "test"})
+        task = asyncio.run(self.scheduler.dequeue())
+        assert self.scheduler._task_revision.get(task["id"], 0) == 0
+        self.scheduler.complete(task["id"])
+        assert self.scheduler._task_revision[task["id"]] == 1
 
 # 2019-01-09T19:07:03 update
 
