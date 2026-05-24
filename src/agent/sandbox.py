@@ -2,8 +2,12 @@
 
 import os
 import tempfile
-import resource
 from typing import Dict, Optional
+
+try:
+    import resource
+except ImportError:
+    resource = None  # Windows: no resource module
 from pathlib import Path
 
 
@@ -37,6 +41,8 @@ class AgentSandbox:
         return self._sandboxes.get(agent_id)
 
     def apply_limits(self, agent_id: str, limits: ResourceLimits) -> None:
+        if resource is None:
+            return  # Windows: resource limits not supported
         try:
             resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_time, limits.cpu_time))
             mem_bytes = limits.memory_mb * 1024 * 1024
