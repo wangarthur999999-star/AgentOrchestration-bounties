@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from .routes import router
-from .middleware import AuthMiddleware, RateLimitMiddleware, LoggingMiddleware
+from .middleware import AuthMiddleware, CORSAllowlistMiddleware, LoggingMiddleware, RateLimitMiddleware
 
 
 def create_app(config: Dict = None) -> FastAPI:
@@ -19,6 +19,8 @@ def create_app(config: Dict = None) -> FastAPI:
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
+
+    app.add_middleware(CORSAllowlistMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

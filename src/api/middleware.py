@@ -1,13 +1,68 @@
 """API middleware components."""
 
+import os
 import time
 import logging
-from typing import Callable
+from typing import Callable, List, Optional
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
+
+
+class CORSAllowlistMiddleware(BaseHTTPMiddleware):
+    """Validate Origin against the CORS allowlist for credentialed requests.
+
+    Per the Fetch spec (section 3.2), credentialed requests MUST NOT
+    use a wildcard (*) origin.  The existing CORSMiddleware only sets
+    response headers — it does not block requests whose Origin is not
+    in the allowlist.  This middleware enforces the allowlist BEFORE
+    the request reaches expensive or stateful handlers.
+
+    Credential-bearing requests from disallowed origins receive a 403
+    immediately, closing the gap that CORSMiddleware alone leaves open.
+    """
+
+    def __init__(
+        self,
+        app,
+        allow_origins: Optional[List[str]] = None,
+    ):
+        super().__init__(app)
+        if allow_origins is None:
+            allow_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+        self._allow_origins = [o.strip() for o in allow_origins if o.strip()]
+        if not self._allow_origins:
+            self._allow_origins = ["*"]
+
+    @staticmethod
+    def _is_credentialed(request: Request) -> bool:
+        return bool(
+            request.headers.get("Authorization")
+            or request.headers.get("Cookie")
+        )
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        origin = (request.headers.get("Origin") or "").strip()
+        if not origin:
+            return await call_next(request)
+
+        if self._is_credentialed(request):
+            if "*" in self._allow_origins:
+                return Response(
+                    status_code=403,
+                    content='{"error":"CORS policy: credentials not allowed with wildcard origin"}',
+                    media_type="application/json",
+                )
+            if origin not in self._allow_origins:
+                return Response(
+                    status_code=403,
+                    content='{"error":"CORS policy: origin not in allowlist for credentialed request"}',
+                    media_type="application/json",
+                )
+
+        return await call_next(request)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
