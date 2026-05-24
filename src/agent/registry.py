@@ -73,7 +73,34 @@ class AgentRegistry:
     def count(self) -> int:
         return len(self._agents)
 
-# 2019-01-29T11:24:49 update
+    def batch_update(
+        self, updates: List[Dict[str, Any]], operation: str = "update_status"
+    ) -> List[Dict[str, Any]]:
+        """Validate all updates before applying any — prevents partial success."""
+        if not updates:
+            raise ValueError("Batch update must include at least one entry")
+
+        for i, entry in enumerate(updates):
+            agent_id = entry.get("agent_id", "")
+            if not agent_id or agent_id not in self._agents:
+                raise ValueError(
+                    f"Batch entry {i}: agent_id '{agent_id}' not found in registry"
+                )
+
+        results: List[Dict[str, Any]] = []
+        for entry in updates:
+            agent_id = entry["agent_id"]
+            if operation == "update_status":
+                new_status = entry.get("status", "pending")
+                self._agents[agent_id]["status"] = new_status
+                self._agents[agent_id]["updated_at"] = time.time()
+            elif operation == "update_config":
+                config = entry.get("config", {})
+                self._agents[agent_id]["config"].update(config)
+                self._agents[agent_id]["updated_at"] = time.time()
+            results.append({"agent_id": agent_id, "status": "updated"})
+
+        return results
 
 # 2019-04-09T13:38:38 update
 

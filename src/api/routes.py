@@ -1,12 +1,35 @@
 """API route definitions."""
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from src.agent import AgentRegistry, AgentStatus
 
 router = APIRouter()
 registry = AgentRegistry()
+
+
+class BatchUpdateEntry(BaseModel):
+    agent_id: str = Field(..., min_length=1, description="Agent identifier")
+    status: Optional[str] = Field(None, description="New status for the agent")
+    config: Optional[Dict[str, Any]] = Field(None, description="Config to merge")
+
+
+class BatchUpdateRequest(BaseModel):
+    operation: str = Field("update_status", description="Operation: update_status or update_config")
+    entries: List[BatchUpdateEntry] = Field(..., min_length=1, max_length=100)
+
+
+class BatchUpdateResponseEntry(BaseModel):
+    agent_id: str
+    status: str
+
+
+class BatchUpdateResponse(BaseModel):
+    results: List[BatchUpdateResponseEntry]
+    total: int
 
 
 @router.get("/agents")
@@ -50,11 +73,30 @@ async def stop_agent(agent_id: str):
     return {"status": "stopped"}
 
 
+@router.post("/agents/batch", response_model=BatchUpdateResponse, status_code=200)
+async def batch_update_agents(request: BatchUpdateRequest):
+    """Batch update agents atomically — validates all entries before any mutation.
+
+    Returns 422 if any agent_id is missing/unknown or the entries list is empty.
+    The entire batch fails or succeeds together — no partial updates.
+    """
+    try:
+        updates = [
+            {"agent_id": e.agent_id, "status": e.status or "pending", "config": e.config or {}}
+            for e in request.entries
+        ]
+        results = registry.batch_update(updates, operation=request.operation)
+        return BatchUpdateResponse(
+            results=[BatchUpdateResponseEntry(**r) for r in results],
+            total=len(results),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @router.get("/agents/count")
 async def agent_count():
     return {"count": registry.count()}
-
-# 2019-03-18T11:10:18 update
 
 # 2019-04-22T13:58:05 update
 
