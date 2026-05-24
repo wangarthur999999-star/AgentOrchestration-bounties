@@ -1,5 +1,29 @@
+import asyncio
+
 import pytest
-from src.orchestrator.scheduler import TaskScheduler
+from src.common.errors import PayloadValidationError
+from src.orchestrator.scheduler import JobPayload, TaskScheduler
+
+VALID_TASK = {"type": "test", "target_agent": "agent-1", "payload": {}}
+
+
+class TestJobPayload:
+    def test_valid_payload(self):
+        jp = JobPayload(**VALID_TASK)
+        assert jp.target_agent == "agent-1"
+        assert jp.type == "test"
+
+    def test_missing_target_agent(self):
+        with pytest.raises(Exception):
+            JobPayload(type="test")
+
+    def test_empty_target_agent(self):
+        with pytest.raises(Exception):
+            JobPayload(target_agent="  ", type="test")
+
+    def test_legacy_agent_name_migration(self):
+        jp = JobPayload(agent_name="legacy-agent", target_agent="legacy-agent", type="test")
+        assert jp.target_agent == "legacy-agent"
 
 
 class TestTaskScheduler:
@@ -7,34 +31,102 @@ class TestTaskScheduler:
         self.scheduler = TaskScheduler()
 
     def test_enqueue_task(self):
-        task_id = self.scheduler.enqueue({"type": "test", "payload": {}})
+        task_id = self.scheduler.enqueue({"type": "test", "target_agent": "agent-1", "payload": {}})
         assert task_id is not None
 
     def test_dequeue_task(self):
-        self.scheduler.enqueue({"type": "test", "payload": {"data": 1}})
-        import asyncio
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1", "payload": {"data": 1}})
         task = asyncio.run(self.scheduler.dequeue())
         assert task is not None
         assert task["type"] == "test"
 
     def test_enqueue_multiple_priorities(self):
-        self.scheduler.enqueue({"type": "low"}, priority=1)
-        self.scheduler.enqueue({"type": "high"}, priority=10)
-        import asyncio
+        self.scheduler.enqueue({"type": "low", "target_agent": "agent-1"}, priority=1)
+        self.scheduler.enqueue({"type": "high", "target_agent": "agent-2"}, priority=10)
         task = asyncio.run(self.scheduler.dequeue())
         assert task["type"] == "high"
 
     def test_complete_task(self):
-        self.scheduler.enqueue({"type": "test"})
-        import asyncio
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1"})
         task = asyncio.run(self.scheduler.dequeue())
         assert self.scheduler.complete(task["id"])
 
+    def test_complete_idempotent_double_ack(self):
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1"})
+        task = asyncio.run(self.scheduler.dequeue())
+        assert self.scheduler.complete(task["id"])
+        assert self.scheduler.complete(task["id"])
+
     def test_fail_task_with_retry(self):
-        self.scheduler.enqueue({"type": "test"})
-        import asyncio
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1"})
         task = asyncio.run(self.scheduler.dequeue())
         assert self.scheduler.fail(task["id"])
+
+
+class TestPayloadValidation:
+    def setup_method(self):
+        self.scheduler = TaskScheduler()
+
+    def test_rejects_none(self):
+        with pytest.raises(PayloadValidationError, match="Expected dict"):
+            self.scheduler.enqueue(None)
+
+    def test_rejects_string(self):
+        with pytest.raises(PayloadValidationError, match="Expected dict"):
+            self.scheduler.enqueue("not-a-dict")
+
+    def test_rejects_missing_target_agent(self):
+        with pytest.raises(PayloadValidationError, match="target_agent"):
+            self.scheduler.enqueue({"type": "test"})
+
+    def test_rejects_empty_target_agent(self):
+        with pytest.raises(PayloadValidationError, match="target_agent"):
+            self.scheduler.enqueue({"type": "test", "target_agent": "  "})
+
+    def test_rejects_empty_dict(self):
+        with pytest.raises(PayloadValidationError):
+            self.scheduler.enqueue({})
+
+    def test_accepts_legacy_agent_name(self):
+        task_id = self.scheduler.enqueue({
+            "type": "test",
+            "target_agent": "old-agent",
+            "agent_name": "old-agent",
+        })
+        assert task_id is not None
+
+    def test_legacy_missing_id_gets_assigned(self):
+        task_id = self.scheduler.enqueue({
+            "type": "migration-test",
+            "target_agent": "migrated-agent",
+        })
+        assert task_id is not None
+        task = asyncio.run(self.scheduler.dequeue())
+        assert task["id"] == task_id
+        assert task["target_agent"] == "migrated-agent"
+
+
+class TestDeadLetter:
+    def setup_method(self):
+        self.scheduler = TaskScheduler()
+        self.scheduler._max_retries = 2
+
+    def test_dead_letter_after_max_retries(self):
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1"})
+        task = asyncio.run(self.scheduler.dequeue())
+        assert self.scheduler.fail(task["id"])
+
+        retried = asyncio.run(self.scheduler.dequeue())
+        assert retried is not None
+        assert not self.scheduler.fail(retried["id"])
+
+        assert retried["id"] in self.scheduler._dead_letter
+
+    def test_stale_fail_call_rejected(self):
+        self.scheduler.enqueue({"type": "test", "target_agent": "agent-1"})
+        task = asyncio.run(self.scheduler.dequeue())
+        self.scheduler.complete(task["id"])
+        assert not self.scheduler.fail(task["id"])
 
 # 2019-01-09T19:07:03 update
 

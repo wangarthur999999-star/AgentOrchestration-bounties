@@ -2,9 +2,42 @@
 
 import asyncio
 import heapq
+import logging
 import time
 from typing import Any, Dict, Optional
 from uuid import uuid4
+
+from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
+
+
+class JobPayload(BaseModel):
+    """Validated task payload with legacy field migration.
+
+    Enforces required fields before a task enters the queue,
+    migrates legacy field names, and rejects malformed input.
+    """
+
+    target_agent: str
+    type: str
+    payload: dict = Field(default_factory=dict)
+    id: Optional[str] = None
+    agent_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def migrate_legacy_fields(self):
+        if self.agent_name and self.target_agent == self.agent_name:
+            pass
+        elif self.agent_name:
+            logger.info(
+                "Migrating legacy field agent_name=%s -> target_agent",
+                self.agent_name,
+            )
+            object.__setattr__(self, "target_agent", self.agent_name)
+        if not self.target_agent.strip():
+            raise ValueError("target_agent is required and must be non-empty")
+        return self
 
 
 class PriorityQueue:
@@ -36,12 +69,34 @@ class TaskScheduler:
         self._scheduled: Dict[str, float] = {}
         self._in_flight: Dict[str, Dict] = {}
         self._max_retries = 3
+        self._dead_letter: Dict[str, Dict] = {}
+
+    @staticmethod
+    def _validate_payload(task: Dict) -> JobPayload:
+        """Validate and migrate a task payload before enqueue.
+
+        Raises PayloadValidationError if the payload is malformed.
+        """
+        from src.common.errors import PayloadValidationError
+
+        if not isinstance(task, dict):
+            raise PayloadValidationError(
+                f"Expected dict, got {type(task).__name__}"
+            )
+        try:
+            return JobPayload(**task)
+        except Exception as exc:
+            raise PayloadValidationError(str(exc)) from exc
 
     def enqueue(self, task: Dict, queue: str = "default", priority: int = 0) -> str:
-        task_id = str(uuid4())
+        validated = self._validate_payload(task)
+        task_id = validated.id if validated.id else str(uuid4())
         task["id"] = task_id
+        task["target_agent"] = validated.target_agent
+        task["type"] = validated.type
+        task.setdefault("payload", validated.payload)
         task["enqueued_at"] = time.time()
-        task["retries"] = 0
+        task.setdefault("retries", 0)
 
         if queue not in self._queues:
             self._queues[queue] = PriorityQueue()
@@ -70,15 +125,27 @@ class TaskScheduler:
         return None
 
     def complete(self, task_id: str) -> bool:
-        return self._in_flight.pop(task_id, None) is not None
+        in_flight = self._in_flight.pop(task_id, None)
+        if in_flight is None:
+            logger.debug("Task %s already completed or never in flight (idempotent no-op)", task_id)
+        else:
+            logger.info("Task %s completed", task_id)
+        return True
 
     def fail(self, task_id: str, queue: str = "default") -> bool:
         task = self._in_flight.pop(task_id, None)
-        if task:
-            task["retries"] += 1
-            if task["retries"] < self._max_retries:
-                self.enqueue(task, queue, priority=task.get("priority", 0))
-                return True
+        if not task:
+            logger.debug("Task %s not in flight; rejecting stale fail call", task_id)
+            return False
+        task["retries"] += 1
+        if task["retries"] < self._max_retries:
+            self.enqueue(task, queue, priority=task.get("priority", 0))
+            return True
+        self._dead_letter[task_id] = task
+        logger.warning(
+            "Task %s exhausted retries (%d/%d); moved to dead-letter",
+            task_id, task["retries"], self._max_retries,
+        )
         return False
 
 # 2019-04-25T08:37:12 update

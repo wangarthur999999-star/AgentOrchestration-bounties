@@ -41,6 +41,16 @@ class ResourceExhaustedError(AgentOrchestratorError):
     def __init__(self, resource: str):
         super().__init__(f"Resource exhausted: {resource}")
 
+
+class PayloadValidationError(AgentOrchestratorError):
+    def __init__(self, reason: str):
+        super().__init__(f"Payload validation failed: {reason}")
+
+
+class DuplicateTaskError(AgentOrchestratorError):
+    def __init__(self, task_id: str):
+        super().__init__(f"Duplicate task ack for {task_id}")
+
 # 2019-01-25T13:21:06 update
 
 # 2019-02-15T19:31:32 update
