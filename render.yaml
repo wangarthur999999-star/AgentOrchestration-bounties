@@ -1,0 +1,19 @@
+# Render deployment config for CodeSage
+services:
+  - type: web
+    name: codesage
+    env: python
+    plan: free
+    buildCommand: pip install openai httpx uvicorn starlette
+    startCommand: python -m uvicorn src.codesage.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: CODESAGE_WEBHOOK_SECRET
+        sync: false
+      - key: CODESAGE_APP_ID
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
