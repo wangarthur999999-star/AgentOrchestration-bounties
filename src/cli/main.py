@@ -1,177 +1,217 @@
-"""CLI entry point for the agent orchestrator."""
+"""CLI entry point for multi-agent orchestration."""
 
 import argparse
+import asyncio
+import json
+import os
 import sys
 
 from src.common.config import Config
 from src.common.logging import configure_logging
+from src.orchestrator.multi_agent import (
+    DebateStrategy,
+    GroupChatStrategy,
+    HybridStrategy,
+    ManagerWorkerStrategy,
+    MultiAgentOrchestrator,
+    RoundRobinStrategy,
+)
+from src.sdk.llm_agent import LLMAgent
+from src.sdk.tools import ToolRegistry
+
+AGENT_TEMPLATES = {
+    "analyst": "You are a data analyst. Break down problems methodically. Provide clear, data-driven insights.",
+    "engineer": "You are a software engineer. Write clean, working code. Consider edge cases and error handling.",
+    "critic": "You are a constructive critic. Find flaws in reasoning and propose improvements.",
+    "researcher": "You are a researcher. Gather and synthesize information from multiple perspectives.",
+    "planner": "You are a strategic planner. Decompose goals into actionable steps with dependencies.",
+}
+
+STRATEGIES = {
+    "round-robin": RoundRobinStrategy,
+    "group-chat": GroupChatStrategy,
+    "debate": DebateStrategy,
+    "manager-worker": ManagerWorkerStrategy,
+}
+
+
+def _get_api_config(args) -> tuple[str, str, str]:
+    api_key = args.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+    base_url = args.base_url or os.environ.get("AO_BASE_URL", "https://api.deepseek.com/v1")
+    model = args.model or os.environ.get("AO_MODEL", "deepseek-chat")
+    return api_key, base_url, model
+
+
+def _build_agent(agent_id: str, template: str, api_key: str, base_url: str, model: str) -> LLMAgent:
+    system_prompt = AGENT_TEMPLATES.get(template, template)
+    return LLMAgent(
+        agent_id=agent_id,
+        name=f"{template}-{agent_id}",
+        system_prompt=system_prompt,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )
+
+
+def _parse_agents_arg(agents_arg: str, api_key: str, base_url: str, model: str) -> dict[str, LLMAgent]:
+    agents = {}
+    for pair in agents_arg.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            agent_id, template = pair.split(":", 1)
+        else:
+            agent_id = template = pair
+        agents[agent_id] = _build_agent(agent_id, template, api_key, base_url, model)
+    return agents
+
+
+def cmd_team_run(args) -> None:
+    """Run a multi-agent team with a conversation strategy."""
+    api_key, base_url, model = _get_api_config(args)
+
+    if not api_key:
+        print("Error: API key required. Set DEEPSEEK_API_KEY or use --api-key.")
+        sys.exit(1)
+
+    agents = _parse_agents_arg(args.agents, api_key, base_url, model)
+
+    strategy_cls = STRATEGIES.get(args.strategy)
+    if strategy_cls is None:
+        print(f"Unknown strategy: {args.strategy}. Available: {', '.join(STRATEGIES)}")
+        sys.exit(1)
+
+    if args.strategy == "debate":
+        strategy = DebateStrategy(debate_topic=args.prompt, max_rounds=args.rounds)
+    elif args.strategy == "manager-worker":
+        agent_ids = list(agents.keys())
+        strategy = ManagerWorkerStrategy(
+            manager_agent_id=agent_ids[0],
+            worker_agent_ids=agent_ids[1:] if len(agent_ids) > 1 else agent_ids,
+            max_rounds=args.rounds,
+        )
+    elif args.strategy == "round-robin":
+        strategy = RoundRobinStrategy(agent_order=list(agents.keys()), max_rounds=args.rounds)
+    else:
+        strategy = strategy_cls(max_rounds=args.rounds)
+
+    orchestrator = MultiAgentOrchestrator()
+    result = asyncio.run(orchestrator.run_team(
+        team_id=args.team_id or "cli-team",
+        agents=agents,
+        strategy=strategy,
+        initial_task={"prompt": args.prompt},
+    ))
+
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+def cmd_plan(args) -> None:
+    """Decompose a goal into an execution plan using the PlanningEngine."""
+    api_key, base_url, model = _get_api_config(args)
+
+    if not api_key:
+        print("Error: API key required. Set DEEPSEEK_API_KEY or use --api-key.")
+        sys.exit(1)
+
+    from src.orchestrator.planning import PlanningEngine
+
+    available_agents = [{"name": name} for name in AGENT_TEMPLATES]
+    engine = PlanningEngine(api_key=api_key, base_url=base_url, model=model)
+
+    async def run_plan():
+        plan = await engine.plan(args.goal, available_agents, max_steps=args.max_steps)
+        return plan
+
+    plan = asyncio.run(run_plan())
+    print(engine.plan_summary(plan))
+
+
+def cmd_list_agents(args) -> None:  # noqa: ARG001
+    """List available agent templates."""
+    print("Available agent templates:")
+    for name, prompt in AGENT_TEMPLATES.items():
+        print(f"  {name}: {prompt[:80]}...")
+    print()
+    print("Available strategies:")
+    for name in STRATEGIES:
+        print(f"  {name}")
+
+
+def cmd_list_tools(args) -> None:  # noqa: ARG001
+    """List available built-in tools."""
+    print("Built-in tools:")
+    print("  search: Web search via configurable backend")
+    print("  read_file: Read a file from the filesystem")
+    print("  run_code: Execute Python code in a sandbox")
+    print()
+    print("Use `multi-agent run --tools search,read_file` to enable tools.")
 
 
 def cli():
-    parser = argparse.ArgumentParser(description="Agent Orchestrator CLI")
-    parser.add_argument("--config", "-c", help="Path to config file")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser = argparse.ArgumentParser(
+        description="Multi-Agent Orchestration CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  multi-agent team run --agents "manager:planner,worker1:engineer" --strategy manager-worker --prompt "Build a REST API"
+  multi-agent team run --agents "pro:analyst,con:critic" --strategy debate --prompt "Should we use microservices?"
+  multi-agent plan --goal "Add real-time notifications to the dashboard"
+  multi-agent list agents
+        """,
+    )
+    parser.add_argument("--api-key", help="LLM API key (or set DEEPSEEK_API_KEY)")
+    parser.add_argument("--base-url", help="LLM API base URL")
+    parser.add_argument("--model", help="Model name")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
 
-    init_parser = subparsers.add_parser("init", help="Initialize a new project")
-    init_parser.add_argument("name", help="Project name")
+    # team run
+    team_parser = subparsers.add_parser("team", help="Manage agent teams")
+    team_subs = team_parser.add_subparsers(dest="team_command")
+    run_parser = team_subs.add_parser("run", help="Run a multi-agent team")
+    run_parser.add_argument("--agents", "-a", required=True, help="Agent pairs: 'id:template,id:template,...'")
+    run_parser.add_argument("--strategy", "-s", required=True, choices=list(STRATEGIES), help="Conversation strategy")
+    run_parser.add_argument("--prompt", "-p", required=True, help="Task prompt")
+    run_parser.add_argument("--rounds", "-r", type=int, default=5, help="Max rounds (default: 5)")
+    run_parser.add_argument("--team-id", help="Team identifier")
+    run_parser.add_argument("--tools", help="Comma-separated tool names to enable")
 
-    deploy_parser = subparsers.add_parser("deploy", help="Deploy an agent")
-    deploy_parser.add_argument("manifest", help="Path to agent manifest file")
+    # plan
+    plan_parser = subparsers.add_parser("plan", help="Decompose a goal into steps")
+    plan_parser.add_argument("--goal", "-g", required=True, help="Goal to decompose")
+    plan_parser.add_argument("--max-steps", "-n", type=int, default=8, help="Max plan steps")
 
-    status_parser = subparsers.add_parser("status", help="Show agent status")
-    status_parser.add_argument("--watch", "-w", action="store_true", help="Watch mode")
-
-    logs_parser = subparsers.add_parser("logs", help="View agent logs")
-    logs_parser.add_argument("agent_id", help="Agent ID")
-    logs_parser.add_argument("--tail", "-t", type=int, default=50, help="Number of lines")
+    # list
+    list_parser = subparsers.add_parser("list", help="List resources")
+    list_subs = list_parser.add_subparsers(dest="list_command")
+    list_agents = list_subs.add_parser("agents", help="List agent templates")
+    list_agents.set_defaults(func=cmd_list_agents)
+    list_tools = list_subs.add_parser("tools", help="List built-in tools")
+    list_tools.set_defaults(func=cmd_list_tools)
 
     args = parser.parse_args()
 
     if args.verbose:
         configure_logging("DEBUG")
     else:
-        configure_logging("INFO")
+        configure_logging("WARNING")
 
-    if args.command == "init":
-        print(f"Initializing project: {args.name}")
-    elif args.command == "deploy":
-        print(f"Deploying agent from manifest: {args.manifest}")
-    elif args.command == "status":
-        print("Checking agent status...")
-    elif args.command == "logs":
-        print(f"Fetching logs for agent: {args.agent_id}")
+    if args.command == "team" and hasattr(args, "team_command") and args.team_command == "run":
+        cmd_team_run(args)
+    elif args.command == "plan":
+        cmd_plan(args)
+    elif args.command == "list":
+        if hasattr(args, "func"):
+            args.func(args)
+        elif hasattr(args, "list_command") and args.list_command == "agents":
+            cmd_list_agents(args)
+        elif hasattr(args, "list_command") and args.list_command == "tools":
+            cmd_list_tools(args)
     else:
         parser.print_help()
-        sys.exit(1)
 
 
 if __name__ == "__main__":
     cli()
-
-# 2019-01-03T18:44:00 update
-
-# 2019-01-15T19:36:16 update
-
-# 2019-02-15T12:13:23 update
-
-# 2019-03-18T20:23:13 update
-
-# 2019-03-22T09:42:46 update
-
-# 2019-03-25T09:42:45 update
-
-# 2019-07-16T18:56:48 update
-
-# 2019-07-25T19:52:16 update
-
-# 2019-08-18T18:35:47 update
-
-# 2019-10-08T08:27:44 update
-
-# 2019-11-05T14:16:14 update
-
-# 2019-12-06T15:08:55 update
-
-# 2020-01-15T12:28:12 update
-
-# 2020-02-18T12:59:12 update
-
-# 2020-03-18T18:36:09 update
-
-# 2020-03-31T11:11:42 update
-
-# 2020-06-16T08:24:25 update
-
-# 2020-07-08T18:35:39 update
-
-# 2020-12-09T10:37:56 update
-
-# 2020-12-18T09:38:50 update
-
-# 2020-12-29T13:08:30 update
-
-# 2021-01-01T10:07:30 update
-
-# 2021-01-19T16:42:27 update
-
-# 2021-03-04T16:47:19 update
-
-# 2021-06-25T09:17:23 update
-
-# 2021-06-30T09:57:21 update
-
-# 2021-10-14T19:11:31 update
-
-# 2021-10-28T12:40:28 update
-
-# 2021-11-29T14:09:58 update
-
-# 2021-12-09T08:29:48 update
-
-# 2021-12-14T12:25:33 update
-
-# 2021-12-17T08:11:09 update
-
-# 2022-01-05T12:27:12 update
-
-# 2022-01-05T17:17:05 update
-
-# 2022-02-25T13:48:23 update
-
-# 2022-04-15T08:25:05 update
-
-# 2022-07-13T19:24:38 update
-
-# 2022-09-02T17:41:54 update
-
-# 2022-12-17T16:02:25 update
-
-# 2023-03-09T09:50:27 update
-
-# 2023-04-10T10:37:23 update
-
-# 2023-06-01T10:30:02 update
-
-# 2023-06-27T09:30:48 update
-
-# 2023-08-04T08:53:47 update
-
-# 2023-09-29T20:24:53 update
-
-# 2023-10-25T18:53:52 update
-
-# 2023-12-04T15:52:41 update
-
-# 2024-01-03T09:27:19 update
-
-# 2024-03-07T17:47:20 update
-
-# 2024-04-08T19:24:37 update
-
-# 2024-06-10T10:00:24 update
-
-# 2024-08-07T19:47:04 update
-
-# 2024-09-17T14:57:37 update
-
-# 2024-10-02T09:59:06 update
-
-# 2024-12-10T17:02:51 update
-
-# 2025-01-17T08:55:36 update
-
-# 2025-02-27T18:17:16 update
-
-# 2025-05-07T13:33:58 update
-
-# 2025-05-31T17:12:56 update
-
-# 2025-06-03T15:53:08 update
-
-# 2026-01-28T11:15:32 update
-
-# 2026-03-21T19:53:15 update
-
-# 2026-05-06T09:09:51 update

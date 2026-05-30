@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Optional, TypedDict
 
 from src.agent import AgentRegistry, AgentStatus
 from src.orchestrator.scheduler import TaskScheduler
@@ -11,21 +11,37 @@ from src.orchestrator.scheduler import TaskScheduler
 logger = logging.getLogger(__name__)
 
 
+class Task(TypedDict, total=False):
+    id: str
+    target_agent: str
+    payload: dict[str, Any]
+
+
+class AgentRecord(TypedDict, total=False):
+    name: str
+    status: str
+
+
+Hook = Callable[..., Awaitable[None]]
+
+
 class OrchestrationEngine:
-    def __init__(self, max_workers: int = 10, agent_timeout: int = 300):
+    """Coordinates agent lifecycle, task scheduling, and hook execution."""
+
+    def __init__(self, max_workers: int = 10, agent_timeout: int = 300) -> None:
         self.registry = AgentRegistry()
         self.scheduler = TaskScheduler()
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.agent_timeout = agent_timeout
         self._running = False
-        self._hooks: Dict[str, List[Callable]] = {
+        self._hooks: dict[str, list[Hook]] = {
             "pre_execute": [],
             "post_execute": [],
             "on_error": [],
             "on_complete": [],
         }
 
-    def register_hook(self, event: str, callback: Callable) -> None:
+    def register_hook(self, event: str, callback: Hook) -> None:
         if event in self._hooks:
             self._hooks[event].append(callback)
 
@@ -42,10 +58,10 @@ class OrchestrationEngine:
         self._running = False
         logger.info("Orchestration engine stopped")
 
-    async def _execute_task(self, task: Dict[str, Any]) -> None:
+    async def _execute_task(self, task: Task) -> None:
         task_id = task["id"]
         agent_id = task["target_agent"]
-        logger.info(f"Executing task {task_id} on agent {agent_id}")
+        logger.info("Executing task %s on agent %s", task_id, agent_id)
 
         for hook in self._hooks["pre_execute"]:
             await hook(task)
@@ -65,14 +81,14 @@ class OrchestrationEngine:
             for hook in self._hooks["post_execute"]:
                 await hook(task, result)
 
-            logger.info(f"Task {task_id} completed successfully")
+            logger.info("Task %s completed successfully", task_id)
 
         except Exception as e:
-            logger.error(f"Task {task_id} failed: {e}")
+            logger.error("Task %s failed: %s", task_id, e)
             for hook in self._hooks["on_error"]:
                 await hook(task, e)
 
-    async def _run_agent_task(self, agent: Dict, task: Dict) -> Any:
+    async def _run_agent_task(self, agent: AgentRecord, task: Task) -> dict[str, str]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self.executor,
@@ -81,7 +97,7 @@ class OrchestrationEngine:
             task,
         )
 
-    def _execute_in_thread(self, agent: Dict, task: Dict) -> Any:
+    def _execute_in_thread(self, agent: AgentRecord, task: Task) -> dict[str, str]:
         return {"status": "completed", "output": f"Task {task['id']} processed by {agent['name']}"}
 
 # 2019-04-24T14:55:39 update

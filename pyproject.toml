@@ -18,6 +18,9 @@ dependencies = [
 [project.scripts]
 ao = "src.cli.main:cli"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.uv]
 dev-dependencies = [
     "pytest>=7.0",

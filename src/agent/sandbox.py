@@ -23,7 +23,25 @@ class AgentSandbox:
         self.base_path = Path(base_path or tempfile.mkdtemp(prefix="ao_sandbox_"))
         self._sandboxes: Dict[str, Path] = {}
 
+    @staticmethod
+    def _sanitize_agent_id(agent_id: str) -> str:
+        stripped = agent_id.strip()
+        if not stripped:
+            raise ValueError("Agent ID must not be empty")
+
+        if ".." in agent_id:
+            raise ValueError("Agent ID contains path traversal")
+
+        if "/" in agent_id or "\\" in agent_id:
+            raise ValueError("Agent ID contains path separator")
+
+        if not all(c.isalnum() or c in "-_." for c in agent_id):
+            raise ValueError("Agent ID contains invalid characters")
+
+        return agent_id
+
     def create(self, agent_id: str, limits: Optional[ResourceLimits] = None) -> Path:
+        self._sanitize_agent_id(agent_id)
         sandbox_path = self.base_path / agent_id
         sandbox_path.mkdir(parents=True, exist_ok=True)
         self._sandboxes[agent_id] = sandbox_path

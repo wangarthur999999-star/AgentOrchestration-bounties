@@ -1,10 +1,36 @@
 """Orchestration engine module."""
 
+from .approval import (
+    ApprovalGateway,
+    ApprovalHandler,
+    ApprovalRequest,
+    ApprovalResponse,
+    ApprovalStatus,
+    AutoApprovalHandler,
+    CLIApprovalHandler,
+)
 from .engine import OrchestrationEngine
 from .scheduler import TaskScheduler
 from .workflow import WorkflowManager
+from .multi_agent import (
+    ConversationStrategy,
+    DebateStrategy,
+    GroupChatStrategy,
+    HybridStrategy,
+    ManagerWorkerStrategy,
+    MultiAgentOrchestrator,
+    RoundRobinStrategy,
+)
+from .planning import ExecutionPlan, PlanningEngine
 
-__all__ = ["OrchestrationEngine", "TaskScheduler", "WorkflowManager"]
+__all__ = [
+    "ApprovalGateway", "ApprovalHandler", "ApprovalRequest", "ApprovalResponse",
+    "ApprovalStatus", "AutoApprovalHandler", "CLIApprovalHandler",
+    "OrchestrationEngine", "TaskScheduler", "WorkflowManager",
+    "ConversationStrategy", "DebateStrategy", "GroupChatStrategy",
+    "HybridStrategy", "ManagerWorkerStrategy", "MultiAgentOrchestrator",
+    "RoundRobinStrategy", "ExecutionPlan", "PlanningEngine",
+]
 
 # 2019-07-01T16:04:27 update
 
