@@ -1,0 +1,18 @@
+{
+  "name": "CodeSage AI Review",
+  "url": "https://github.com/wangarthur999999-star/AgentOrchestration-bounties",
+  "hook_attributes": {
+    "url": "https://96b208f66e01d9a3-186-179-163-60.serveousercontent.com/webhook",
+    "secret": "f31fb8b42e71601d2529dad548df9a0a2c2eebcadc0fe836e5f11cd2e2f16ad1"
+  },
+  "redirect_url": "",
+  "description": "AI-powered code review that catches security vulnerabilities, bugs, and performance issues before they reach production. Powered by DeepSeek.",
+  "public": false,
+  "default_permissions": {
+    "pull_requests": "write",
+    "contents": "read"
+  },
+  "default_events": [
+    "pull_request"
+  ]
+}

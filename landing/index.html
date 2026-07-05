@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeSage — AI Code Review for Every Pull Request</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --danger: #f85149;
+    --warn: #d2991d;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    padding: 80px 0 60px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 3rem; font-weight: 700; letter-spacing: -0.5px; }
+  header h1 span { color: var(--accent); }
+  header p { font-size: 1.2rem; color: var(--text-dim); margin-top: 16px; max-width: 600px; margin-inline: auto; }
+
+  .cta-group { margin-top: 32px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    padding: 12px 28px;
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    display: inline-block;
+  }
+  .btn-primary { background: var(--accent2); color: #000; }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn:hover { opacity: 0.9; }
+
+  section { padding: 80px 0; }
+  section:nth-child(even) { background: var(--surface); }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px; margin-top: 40px; }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+  }
+  .feature-card h3 { font-size: 1.1rem; margin-bottom: 8px; color: var(--accent); }
+  .feature-card p { color: var(--text-dim); font-size: 0.95rem; }
+
+  .pricing {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin-top: 40px;
+  }
+  .plan {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+  }
+  .plan.pro { border-color: var(--accent); }
+  .plan h3 { font-size: 1.3rem; margin-bottom: 8px; }
+  .plan .price { font-size: 2.5rem; font-weight: 700; margin: 16px 0; }
+  .plan .price span { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+  .plan ul { list-style: none; text-align: left; margin: 24px 0; }
+  .plan li { padding: 6px 0; color: var(--text-dim); font-size: 0.95rem; }
+  .plan li::before { content: "✓ "; color: var(--accent2); }
+
+  .severity-demo { font-family: monospace; font-size: 0.9rem; line-height: 2; }
+  .sev-crit { color: var(--danger); }
+  .sev-high { color: var(--warn); }
+  .sev-med { color: var(--accent); }
+  .sev-low { color: var(--text-dim); }
+
+  footer { border-top: 1px solid var(--border); padding: 40px 0; text-align: center; color: var(--text-dim); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header class="container">
+  <h1>Code Review, <span>Automated</span></h1>
+  <p>AI-powered multi-perspective code review for every pull request.
+  Catch bugs, security flaws, and performance issues before they merge.</p>
+  <div class="cta-group">
+    <a href="https://github.com/apps/codesage-ai" class="btn btn-primary">Install Free on GitHub</a>
+    <a href="#pricing" class="btn btn-secondary">View Plans</a>
+  </div>
+</header>
+
+<section>
+  <div class="container">
+    <h2 style="text-align:center; margin-bottom:20px;">What CodeSage Checks</h2>
+    <div class="features">
+      <div class="feature-card">
+        <h3>Security</h3>
+        <p>SQL injection, XSS, hardcoded secrets, unsafe crypto, path traversal, authentication bypasses.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Bugs & Logic</h3>
+        <p>Null references, undefined variables, race conditions, incorrect error handling, edge cases.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Performance</h3>
+        <p>N+1 queries, memory leaks, blocking operations, missing pagination, inefficient algorithms.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Maintainability</h3>
+        <p>Deep nesting, long functions, magic numbers, missing type hints, code duplication.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2 style="text-align:center; margin-bottom:20px;">Review Output</h2>
+    <div style="background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:700px; margin:auto;">
+      <p><strong>AI Code Review</strong></p>
+      <p><strong>Found 3 security issues and 2 bugs. Review before merging.</strong></p>
+      <br>
+      <div class="severity-demo">
+        <p><span class="sev-crit">[!] [CRITICAL] SQL injection in user query</span></p>
+        <p style="margin-left:16px;color:var(--text-dim)">src/auth/login.py:10 — Username concatenated into raw SQL</p>
+        <br>
+        <p><span class="sev-crit">[!] [CRITICAL] Hardcoded admin backdoor</span></p>
+        <p style="margin-left:16px;color:var(--text-dim)">src/auth/login.py:13 — admin/admin123 bypasses auth</p>
+        <br>
+        <p><span class="sev-high">[H] [HIGH] Plaintext password comparison</span></p>
+        <p style="margin-left:16px;color:var(--text-dim)">src/auth/login.py:10 — Passwords appear to be stored in plaintext</p>
+        <br>
+        <p><span class="sev-high">[H] [HIGH] Silent failure on missing user</span></p>
+        <p style="margin-left:16px;color:var(--text-dim)">src/api/routes.py:23 — Returns None instead of error response</p>
+        <br>
+        <p><span class="sev-med">[M] [MEDIUM] Undefined variable request.ip</span></p>
+        <p style="margin-left:16px;color:var(--text-dim)">src/auth/login.py:15 — request is not in scope</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="container">
+    <h2 style="text-align:center; margin-bottom:20px;">Pricing</h2>
+    <div class="pricing">
+      <div class="plan">
+        <h3>Free</h3>
+        <div class="price">$0<span>/month</span></div>
+        <ul>
+          <li>1 private repository</li>
+          <li>5 reviews per month</li>
+          <li>All 4 review perspectives</li>
+          <li>Inline PR comments</li>
+          <li>Public repos: unlimited</li>
+        </ul>
+        <a href="https://github.com/apps/codesage-ai" class="btn btn-secondary">Install Free</a>
+      </div>
+      <div class="plan pro">
+        <h3>Pro</h3>
+        <div class="price">$29<span>/month</span></div>
+        <ul>
+          <li>Unlimited repositories</li>
+          <li>Unlimited reviews</li>
+          <li>All 4 review perspectives</li>
+          <li>Inline PR comments</li>
+          <li>Priority support</li>
+          <li>Custom review rules (soon)</li>
+        </ul>
+        <a href="https://github.com/apps/codesage-ai" class="btn btn-primary">Start Free Trial</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Powered by DeepSeek AI | Built by <a href="https://github.com/wangarthur999999-star">Arthur Wang</a></p>
+    <p style="margin-top:8px;font-size:0.85rem;">CodeSage reviews are advisory. Always verify critical findings manually.</p>
+  </div>
+</footer>
+
+</body>
+</html>

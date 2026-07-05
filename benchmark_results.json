@@ -1,0 +1,59 @@
+{
+  "results": [
+    {
+      "id": "booking-1",
+      "eval": {
+        "accuracy": "A",
+        "tone": "A",
+        "cta": "A",
+        "conciseness": "A",
+        "overall": "A",
+        "comment": "Response A accurately confirms availability, provides a clear next step, and offers alternatives, all in a friendly and concise manner, while Response B is slightly less informative and does not confirm availability."
+      },
+      "ma_time": 11.05,
+      "sa_time": 1.6
+    },
+    {
+      "id": "inquiry-1",
+      "eval": {
+        "accuracy": "A",
+        "tone": "A",
+        "cta": "A",
+        "conciseness": "A",
+        "overall": "A",
+        "comment": "Response A is more accurate with correct pricing, friendlier tone, clearer call to action, and more concise while still natural."
+      },
+      "ma_time": 10.75,
+      "sa_time": 1.86
+    },
+    {
+      "id": "complaint-1",
+      "eval": {
+        "accuracy": "tie",
+        "tone": "A",
+        "cta": "A",
+        "conciseness": "A",
+        "overall": "A",
+        "comment": "Both responses accurately address the complaint, but Response A is more concise, offers a clear and immediate resolution (20% off), and maintains a friendly tone, while Response B asks for more details without a direct offer."
+      },
+      "ma_time": 13.53,
+      "sa_time": 2.05
+    },
+    {
+      "id": "handoff-1",
+      "eval": {
+        "accuracy": "tie",
+        "tone": "A",
+        "cta": "A",
+        "conciseness": "B",
+        "overall": "A",
+        "comment": "Both responses correctly address the handoff intent, but Response A provides a more friendly and proactive tone with a clear call to action for the customer to share details, while Response B is slightly more concise but lacks the same level of engagement and next-step guidance."
+      },
+      "ma_time": 11.93,
+      "sa_time": 1.67
+    }
+  ],
+  "ma_wins": 4,
+  "sa_wins": 0,
+  "ties": 0
+}
